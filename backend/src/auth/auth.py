@@ -1,4 +1,5 @@
 import json
+import os
 from flask import request, _request_ctx_stack,abort
 from functools import wraps
 from jose import jwt
@@ -7,6 +8,7 @@ from urllib.request import urlopen
 
 AUTH0_DOMAIN = "rinfix.us.auth0.com"
 ALGORITHMS = ['RS256']
+# API_AUDIENCE = os.environ.get("API_AUDIENCE")
 API_AUDIENCE = "drinkmenu"
 
 ## AuthError Exception
@@ -21,6 +23,15 @@ class AuthError(Exception):
 
 
 ## Auth Header
+
+'''
+    implements get_token_auth_header() method
+    it attempts to get the header from the request
+        it raises an AuthError if no header is present
+    attempts to split bearer and the token
+    raises an AuthError if the header is malformed
+    return the token part of the header
+'''
 
 def get_token_auth_header():
     """Obtains the Access Token from the Authorization Header
@@ -54,6 +65,17 @@ def get_token_auth_header():
     token = parts[1]
     return token
 
+'''
+    implements check_permissions(permission, payload) method
+    @INPUTS
+        permission: string permission (i.e. 'post:drink')
+        payload: decoded jwt payload
+
+    it raises an AuthError if permissions are not included in the payload
+        !!NOTE check your RBAC settings in Auth0
+    raises an AuthError if the requested permission string is not in the payload permissions array
+    return true otherwise
+'''
 
 def check_permissions(permission, payload):
     if 'permissions' not in payload:
@@ -68,6 +90,19 @@ def check_permissions(permission, payload):
             'description':'Permission not found'
         },403)
 
+'''
+    implements verify_decode_jwt(token) method
+    @INPUTS
+        token: a json web token (string)
+
+    has an Auth0 token with key id (kid)
+    verifies the token using Auth0 /.well-known/jwks.json
+    decodes the payload from the token
+    validates the claims
+    return the decoded payload
+
+    !!NOTE urlopen has a common certificate error described here: https://stackoverflow.com/questions/50236117/scraping-ssl-certificate-verify-failed-error-for-http-en-wikipedia-org
+'''
 
 def verify_decode_jwt(token):
     jsonurl = urlopen(f'https://{AUTH0_DOMAIN}/.well-known/jwks.json')
@@ -122,16 +157,23 @@ def verify_decode_jwt(token):
                 'description': 'Unable to find the appropriate key.'
             }, 400)
 
+'''
+    implements @requires_auth(permission) decorator method
+    @INPUTS
+        permission: string permission (i.e. 'post:drink')
+
+    it uses the get_token_auth_header method to get the token
+    it uses the verify_decode_jwt method to decode the jwt
+    it uses the check_permissions method validate claims and check the requested permission
+    return the decorator which passes the decoded payload to the decorated method
+'''
 
 def requires_auth(permission=''):
     def requires_auth_decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
-            token = get_token_auth_header()
-            try:
-                payload = verify_decode_jwt(token)
-            except:
-               abort(401)
+            token = get_token_auth_header()            
+            payload = verify_decode_jwt(token)                          
             check_permissions(permission, payload)            
             return f(payload, *args, **kwargs)
 
